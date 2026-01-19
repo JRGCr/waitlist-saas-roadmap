@@ -1,0 +1,169 @@
+name: Deploy Waitlist Infrastructure
+
+on:
+  repository_dispatch:
+    types: [deploy]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Wrangler
+        run: npm install -g wrangler
+      
+      - name: Create D1 Database
+        id: d1
+        run: |
+          DB_NAME="${{ github.event.repository.name }}-db"
+          DB_OUTPUT=$(wrangler d1 create "$DB_NAME" 2>&1 || echo "CREATE_FAILED")
+          echo "$DB_OUTPUT"
+          
+          if echo "$DB_OUTPUT" | grep -q "already exists\|CREATE_FAILED"; then
+            echo "Database may already exist, fetching existing database info..."
+            LIST_OUTPUT=$(wrangler d1 list 2>&1)
+            DB_ID=$(echo "$LIST_OUTPUT" | grep "$DB_NAME" | awk '/│.*│.*│.*│/ {gsub(/[│[:space:]]+/, " "); print $1}' | grep -E '^[0-9a-f-]+$' | head -1)
+            if [ -z "$DB_ID" ]; then
+              echo "Error: Database creation failed and could not find existing database"
+              echo "List output:"
+              echo "$LIST_OUTPUT"
+              exit 1
+            fi
+            echo "Using existing database: $DB_ID"
+          else
+            DB_ID=$(echo "$DB_OUTPUT" | sed -n 's/.*"database_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+            if [ -z "$DB_ID" ]; then
+              DB_ID=$(echo "$DB_OUTPUT" | sed -n 's/.*database_id = "\([^"]*\)".*/\1/p')
+            fi
+            if [ -z "$DB_ID" ]; then
+              echo "Error: Failed to parse database_id from wrangler output"
+              echo "Output was:"
+              echo "$DB_OUTPUT"
+              exit 1
+            fi
+          fi
+          
+          echo "database_id=$DB_ID" >> $GITHUB_OUTPUT
+          echo "database_name=$DB_NAME" >> $GITHUB_OUTPUT
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      
+      - name: Run D1 Migrations
+        run: |
+          wrangler d1 execute ${{ steps.d1.outputs.database_name }} \
+            --remote \
+            --file=./migrations/0001_signups.sql
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      
+      - name: Update Worker wrangler.toml
+        run: |
+          sed -i "s/DATABASE_ID_PLACEHOLDER/${{ steps.d1.outputs.database_id }}/" worker/wrangler.toml
+          sed -i "s/DATABASE_NAME_PLACEHOLDER/${{ steps.d1.outputs.database_name }}/" worker/wrangler.toml
+          sed -i "s/WORKER_NAME_PLACEHOLDER/${{ github.event.repository.name }}-api/" worker/wrangler.toml
+          sed -i 's|ALLOWED_ORIGIN_PLACEHOLDER|https://${{ github.event.repository.name }}.pages.dev|' worker/wrangler.toml
+          sed -i 's|WAITLIST_CONFIG_PLACEHOLDER|{\\"cors_mode\\":\\"open\\"}|' worker/wrangler.toml
+          echo "Updated wrangler.toml vars section:"
+          tail -5 worker/wrangler.toml
+      
+      - name: Deploy Worker
+        id: worker
+        working-directory: ./worker
+        run: |
+          npm install
+          DEPLOY_OUTPUT=$(wrangler deploy 2>&1 || true)
+          echo "Worker deploy output:"
+          echo "$DEPLOY_OUTPUT"
+          WORKER_URL=$(echo "$DEPLOY_OUTPUT" | grep -o 'https://[^[:space:]]*\.workers\.dev' | head -1)
+          if [ -z "$WORKER_URL" ]; then
+            echo "Error: Failed to parse worker URL from wrangler output"
+            echo "Full output was:"
+            echo "$DEPLOY_OUTPUT"
+            exit 1
+          fi
+          echo "worker_url=$WORKER_URL" >> $GITHUB_OUTPUT
+          echo "worker_name=${{ github.event.repository.name }}-api" >> $GITHUB_OUTPUT
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      
+      - name: Set Worker Secrets
+        working-directory: ./worker
+        run: |
+          sleep 3
+          echo "${{ secrets.ANALYTICS_SECRET }}" | wrangler secret put ANALYTICS_SECRET || \
+            (wrangler versions deploy && echo "${{ secrets.ANALYTICS_SECRET }}" | wrangler secret put ANALYTICS_SECRET)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      
+      - name: Update Site Config
+        run: |
+          sed -i "s|WORKER_URL_PLACEHOLDER|${{ steps.worker.outputs.worker_url }}|" site/config.js
+      
+      - name: Deploy Pages
+        id: pages
+        run: |
+          PROJECT_NAME="${{ github.event.repository.name }}"
+          wrangler pages project create "$PROJECT_NAME" --production-branch=main 2>&1 || true
+          PAGES_OUTPUT=$(wrangler pages deploy ./site \
+            --project-name="$PROJECT_NAME" \
+            --branch=main \
+            --commit-dirty=true 2>&1 || true)
+          echo "Pages deploy output:"
+          echo "$PAGES_OUTPUT"
+          PAGES_URL="https://$PROJECT_NAME.pages.dev"
+          echo "Using production Pages URL: $PAGES_URL"
+          echo "pages_url=$PAGES_URL" >> $GITHUB_OUTPUT
+          echo "pages_project=$PROJECT_NAME" >> $GITHUB_OUTPUT
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      
+      - name: Get OIDC Token
+        id: oidc
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('InstaWaitlist');
+            core.setOutput('token', token);
+      
+      - name: Notify InstaWaitlist
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            curl -X POST "${{ secrets.INSTAWAITLIST_WEBHOOK_URL }}" \
+              -H "Authorization: Bearer ${{ steps.oidc.outputs.token }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "waitlist_id": "${{ secrets.WAITLIST_ID }}",
+                "status": "success",
+                "cf_d1_database_id": "${{ steps.d1.outputs.database_id }}",
+                "cf_d1_database_name": "${{ steps.d1.outputs.database_name }}",
+                "cf_worker_name": "${{ steps.worker.outputs.worker_name }}",
+                "cf_worker_url": "${{ steps.worker.outputs.worker_url }}",
+                "cf_pages_project": "${{ steps.pages.outputs.pages_project }}",
+                "cf_pages_url": "${{ steps.pages.outputs.pages_url }}"
+              }'
+          else
+            curl -X POST "${{ secrets.INSTAWAITLIST_WEBHOOK_URL }}" \
+              -H "Authorization: Bearer ${{ steps.oidc.outputs.token }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "waitlist_id": "${{ secrets.WAITLIST_ID }}",
+                "status": "failed",
+                "error_message": "Deployment failed - check workflow logs"
+              }'
+          fi
