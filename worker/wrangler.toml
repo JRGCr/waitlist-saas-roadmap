@@ -1,0 +1,13 @@
+name = "WORKER_NAME_PLACEHOLDER"
+main = "index.ts"
+compatibility_date = "2024-01-01"
+account_id = "f91d00926fc61bd972a4fdde51125077"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "DATABASE_NAME_PLACEHOLDER"
+database_id = "DATABASE_ID_PLACEHOLDER"
+
+[vars]
+ALLOWED_ORIGIN = "ALLOWED_ORIGIN_PLACEHOLDER"
+WAITLIST_CONFIG = "WAITLIST_CONFIG_PLACEHOLDER"
