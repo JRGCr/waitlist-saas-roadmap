@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join the Waitlist</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+</head>
+<body>
+  <div id="app">
+    <div class="container">
+      <img id="logo" src="" alt="" style="display: none;">
+      <h1 id="headline"></h1>
+      <p id="description"></p>
+      
+      <form id="signup-form">
+        <div id="name-field" style="display: none;">
+          <input type="text" name="name" placeholder="Your name">
+        </div>
+        
+        <div id="company-field" style="display: none;">
+          <input type="text" name="company" placeholder="Company">
+        </div>
+        
+        <div id="phone-field" style="display: none;">
+          <input type="tel" name="phone" placeholder="Phone number">
+        </div>
+        
+        <div id="job-title-field" style="display: none;">
+          <input type="text" name="job_title" placeholder="Job title">
+        </div>
+        
+        <div id="use-case-field" style="display: none;">
+          <textarea name="use_case" placeholder="What will you use this for?" rows="3"></textarea>
+        </div>
+        
+        <div id="company-size-field" style="display: none;">
+          <select name="company_size">
+            <option value="">Select company size</option>
+            <option value="1-10">1-10 employees</option>
+            <option value="11-50">11-50 employees</option>
+            <option value="51-200">51-200 employees</option>
+            <option value="201-1000">201-1000 employees</option>
+            <option value="1000+">1000+ employees</option>
+          </select>
+        </div>
+        
+        <div id="industry-field" style="display: none;">
+          <input type="text" name="industry" placeholder="Industry">
+        </div>
+        
+        <div id="budget-field" style="display: none;">
+          <select name="budget">
+            <option value="">Select budget range</option>
+            <option value="<$1k">Less than $1,000</option>
+            <option value="$1k-$5k">$1,000 - $5,000</option>
+            <option value="$5k-$10k">$5,000 - $10,000</option>
+            <option value="$10k-$50k">$10,000 - $50,000</option>
+            <option value="$50k+">$50,000+</option>
+          </select>
+        </div>
+        
+        <div id="expected-usage-field" style="display: none;">
+          <textarea name="expected_usage" placeholder="How do you plan to use this?" rows="3"></textarea>
+        </div>
+        
+        <div id="country-field" style="display: none;">
+          <input type="text" name="country" placeholder="Country">
+        </div>
+        
+        <div id="linkedin-field" style="display: none;">
+          <input type="url" name="linkedin" placeholder="LinkedIn profile URL">
+        </div>
+        
+        <div id="twitter-field" style="display: none;">
+          <input type="text" name="twitter" placeholder="Twitter handle">
+        </div>
+        
+        <div id="current-solution-field" style="display: none;">
+          <input type="text" name="current_solution" placeholder="Current solution you're using">
+        </div>
+        
+        <input type="email" name="email" placeholder="your@email.com" required>
+        
+        <input type="text" name="website" style="display: none;" tabindex="-1" autocomplete="off">
+        
+        <div id="turnstile-widget"></div>
+        
+        <button type="submit">Join Waitlist</button>
+      </form>
+      
+      <div id="success-message" style="display: none;">
+        <h2>You're on the list!</h2>
+        <p>We'll be in touch soon.</p>
+      </div>
+      
+      <div id="error-message" style="display: none;">
+        <p>Something went wrong. Please try again.</p>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const config = window.WAITLIST_CONFIG;
+      
+      document.getElementById('headline').textContent = config.headline;
+      document.getElementById('description').textContent = config.description || '';
+      document.documentElement.style.setProperty('--primary-color', config.primary_color);
+      
+      if (config.logo_url) {
+        const logo = document.getElementById('logo');
+        logo.src = config.logo_url;
+        logo.style.display = 'block';
+      }
+      
+      if (config.collect_name) {
+        document.getElementById('name-field').style.display = 'block';
+      }
+      
+      if (config.collect_company) {
+        document.getElementById('company-field').style.display = 'block';
+      }
+      
+      if (config.collect_phone) {
+        document.getElementById('phone-field').style.display = 'block';
+      }
+      
+      if (config.collect_job_title) {
+        document.getElementById('job-title-field').style.display = 'block';
+      }
+      
+      if (config.collect_use_case) {
+        document.getElementById('use-case-field').style.display = 'block';
+      }
+      
+      if (config.collect_company_size) {
+        document.getElementById('company-size-field').style.display = 'block';
+      }
+      
+      if (config.collect_industry) {
+        document.getElementById('industry-field').style.display = 'block';
+      }
+      
+      if (config.collect_budget) {
+        document.getElementById('budget-field').style.display = 'block';
+      }
+      
+      if (config.collect_expected_usage) {
+        document.getElementById('expected-usage-field').style.display = 'block';
+      }
+      
+      if (config.collect_country) {
+        document.getElementById('country-field').style.display = 'block';
+      }
+      
+      if (config.collect_linkedin) {
+        document.getElementById('linkedin-field').style.display = 'block';
+      }
+      
+      if (config.collect_twitter) {
+        document.getElementById('twitter-field').style.display = 'block';
+      }
+      
+      if (config.collect_current_solution) {
+        document.getElementById('current-solution-field').style.display = 'block';
+      }
+      
+      if (config.turnstile_enabled && config.turnstile_site_key) {
+        turnstile.render('#turnstile-widget', {
+          sitekey: config.turnstile_site_key,
+        });
+      }
+      
+      document.getElementById('signup-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const form = e.target;
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        
+        if (config.turnstile_enabled) {
+          data.turnstile_token = turnstile.getResponse();
+        }
+        
+        try {
+          const response = await fetch(config.api_url + '/signup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+          });
+          
+          if (response.ok) {
+            form.style.display = 'none';
+            document.getElementById('success-message').style.display = 'block';
+          } else {
+            document.getElementById('error-message').style.display = 'block';
+          }
+        } catch (error) {
+          document.getElementById('error-message').style.display = 'block';
+        }
+      });
+    });
+  </script>
+</body>
+</html>
